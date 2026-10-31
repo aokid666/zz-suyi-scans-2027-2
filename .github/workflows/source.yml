@@ -1,0 +1,43 @@
+name: Preserve original scans and index Suyi handbook
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/**', 'source-parts.json', '.github/workflows/source.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+concurrency:
+  group: source-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-chi-sim
+      - run: pip install pymupdf pillow
+      - name: Preserve original pixel images and build Chinese OCR
+        run: python scripts/build-source.py --start 83 --end 164
+      - name: Save and publish validated source assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add img data .nojekyll
+          git diff --cached --quiet || git commit -m 'Publish verified original scan pixels and OCR index'
+          git push origin HEAD:main
+          python - <<'PY'
+          import urllib.request,urllib.error,os,json
+          req=urllib.request.Request('https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/pages/builds',data=b'{}',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','User-Agent':'suyi-source','Content-Type':'application/json'})
+          try:
+           with urllib.request.urlopen(req,timeout=60) as r:print('Pages build requested:',r.status)
+          except urllib.error.HTTPError as e:
+           if e.code!=409:raise
+           print('Pages build already running')
+          PY
